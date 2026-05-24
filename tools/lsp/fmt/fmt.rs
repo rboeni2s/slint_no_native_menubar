@@ -813,9 +813,9 @@ fn format_binary_expression(
     });
     let has_newline = op_token.as_ref().and_then(|op| op.as_token()).is_some_and(|op| {
         has_newline_before(op)
-            || op.next_token().is_some_and(|t| {
-                t.kind() == SyntaxKind::Whitespace && t.text().contains('\n')
-            })
+            || op
+                .next_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::Whitespace && t.text().contains('\n'))
     });
 
     if has_newline {
@@ -1753,8 +1753,7 @@ fn format_exports_list(
 ) -> Result<(), std::io::Error> {
     // ExportsList may contain `export { Foo, Bar }` or `export component ...` etc.
     // Only handle the brace-list case specially; otherwise fall through.
-    let has_lbrace =
-        node.children_with_tokens().any(|n| n.kind() == SyntaxKind::LBrace);
+    let has_lbrace = node.children_with_tokens().any(|n| n.kind() == SyntaxKind::LBrace);
     if !has_lbrace {
         // `export component ...` or `export struct ...` — delegate to default
         for n in node.children_with_tokens() {
@@ -1891,9 +1890,9 @@ fn format_export_specifier(
     writer: &mut impl TokenWriter,
     state: &mut FormatState,
 ) -> Result<(), std::io::Error> {
-    let has_as = node
-        .children_with_tokens()
-        .any(|n| n.kind() == SyntaxKind::Identifier && n.as_token().is_some_and(|t| t.text() == "as"));
+    let has_as = node.children_with_tokens().any(|n| {
+        n.kind() == SyntaxKind::Identifier && n.as_token().is_some_and(|t| t.text() == "as")
+    });
 
     let mut sub = node.children_with_tokens();
     whitespace_to(&mut sub, SyntaxKind::ExportIdentifier, writer, state, "")?;
@@ -3137,10 +3136,7 @@ export struct LineEditData {
     fn enum_declaration() {
         assert_formatting("enum Foo {  a,   b,   c }\n", "enum Foo { a, b, c }\n");
         assert_formatting("export enum Foo {  a,   b,   c }\n", "export enum Foo { a, b, c }\n");
-        assert_formatting(
-            "enum Foo { a, b, c, }\n",
-            "enum Foo {\n    a,\n    b,\n    c,\n}\n",
-        );
+        assert_formatting("enum Foo { a, b, c, }\n", "enum Foo {\n    a,\n    b,\n    c,\n}\n");
     }
 
     #[test]
@@ -3151,10 +3147,7 @@ export struct LineEditData {
             "export { SuperLongTypeName, AnotherVeryLongTypeName, YetAnotherExtremelyLongTypeName }\n",
             "export {\n    SuperLongTypeName,\n    AnotherVeryLongTypeName,\n    YetAnotherExtremelyLongTypeName,\n}\n",
         );
-        assert_formatting(
-            "export { Foo, }\n",
-            "export {\n    Foo,\n}\n",
-        );
+        assert_formatting("export { Foo, }\n", "export {\n    Foo,\n}\n");
     }
 
     #[test]
