@@ -1,9 +1,10 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: MIT
 //
-// Generate a Starlight "Third-Party Licenses" Markdown page from cargo-about's
-// JSON output. Shared by the per-language docs sites (docs/nodejs, docs/python),
-// which differ only in the crate directory and the output path.
+// Generate a Starlight "Third-Party Licenses" Markdown page from the JSON
+// emitted by `cargo xtask license`. Shared by the per-language docs sites
+// (docs/nodejs, docs/python), which differ only in the crate directory and the
+// output path.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -69,9 +70,9 @@ function renderThirdPartyMarkdown(data: AboutOutput): string {
 }
 
 /**
- * Run `cargo about generate --format json` in `crateDir` and write the rendered
- * Third-Party Licenses Markdown page to `outFile`. Exits the process if
- * cargo-about fails.
+ * Run `cargo xtask license --format json` in `crateDir` and write the rendered
+ * Third-Party Licenses Markdown page to `outFile`. Exits the process if the
+ * generator fails.
  */
 export function generateThirdPartyMarkdown(options: {
     crateDir: string;
@@ -83,7 +84,7 @@ export function generateThirdPartyMarkdown(options: {
 
     const result = spawnSync(
         "cargo",
-        ["about", "generate", "--format", "json", "-o", aboutJsonFile],
+        ["xtask", "license", "--format", "json", "-o", aboutJsonFile],
         { cwd: crateDir, stdio: "inherit" },
     );
     if (result.status !== 0) {
@@ -99,7 +100,7 @@ export function generateThirdPartyMarkdown(options: {
         try {
             unlinkSync(aboutJsonFile);
         } catch {
-            // ignore if cargo-about did not write the file
+            // ignore if the generator did not write the file
         }
     }
 }

@@ -90,7 +90,7 @@ mkdirSync(dirname(outFile), { recursive: true });
 
 const result = spawnSync(
     "cargo",
-    ["about", "generate", "--format", "json", "-o", aboutJsonFile],
+    ["xtask", "license", "--format", "json", "-o", aboutJsonFile],
     { cwd: apiCpp, stdio: "inherit" },
 );
 
@@ -105,6 +105,6 @@ try {
     try {
         unlinkSync(aboutJsonFile);
     } catch {
-        // ignore if cargo-about did not write the file
+        // ignore if the generator did not write the file
     }
 }
