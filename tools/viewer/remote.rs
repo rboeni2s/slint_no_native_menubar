@@ -228,8 +228,8 @@ async fn build_and_show(
         "Cached files: {:#?}",
         file_cache.iter().map(|entry| entry.key().to_string()).collect::<Vec<_>>()
     );
-    let compilation_result = if let Some(entry) = file_cache
-        .get(preview_component.url.to_file_path().unwrap().as_os_str().to_str().unwrap())
+    let compilation_result = if let Some(entry) =
+        file_cache.get(preview_component.url.to_file_path().unwrap().as_os_str().to_str().unwrap())
         && let CacheEntry::Ready(file) = &*entry
     {
         tracing::debug!("Fetched file {} from cache.", preview_component.url);
