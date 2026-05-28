@@ -9,7 +9,7 @@
 //! the features actually enabled in the analyzed crate, and then harvests the
 //! license texts directly from the crate sources in the cache.
 
-// cSpell: ignore noassertion licence rsplit
+// cSpell: ignore licence rsplit
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -39,9 +39,6 @@ const ACCEPTED: &[&str] = &[
 
 /// Skip dependencies reachable only through dev-dependency edges.
 const IGNORE_DEV_DEPENDENCIES: bool = true;
-
-/// Silently drop crates without any license information instead of failing.
-const FILTER_NOASSERTION: bool = true;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Format {
@@ -124,11 +121,6 @@ pub fn generate(args: &GenerateArgs) -> anyhow::Result<()> {
 
     for pkg in &packages {
         let Some(expression) = pkg.license.clone() else {
-            // No license information. With FILTER_NOASSERTION this is silently
-            // dropped, otherwise it is an error.
-            if FILTER_NOASSERTION {
-                continue;
-            }
             bail!("Crate {} {} has no license information", pkg.name, pkg.version);
         };
 
