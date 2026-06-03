@@ -165,7 +165,13 @@ impl PlatformTray {
             hmenu: Cell::new(None),
             tip: RefCell::new(tip),
         });
-        unsafe { SetWindowLongPtrW(inner.hwnd, GWLP_USERDATA, &*inner as *const Inner as isize) };
+        unsafe {
+            SetWindowLongPtrW(
+                inner.hwnd,
+                GWLP_USERDATA,
+                (&*inner as *const Inner as isize).try_into().unwrap(),
+            )
+        };
 
         Ok(Self { inner })
     }
