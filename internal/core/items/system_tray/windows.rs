@@ -468,8 +468,14 @@ fn notify_icon_data(hwnd: HWND, hicon: HICON, tip: &[u16]) -> NOTIFYICONDATAW {
         hIcon: hicon,
         ..Default::default()
     };
-    let n = tip.len().min(data.szTip.len() - 1);
-    data.szTip[..n].copy_from_slice(&tip[..n]);
+
+    //NOTE: szTip is unaligned in i686-pc-windows-msvc and can only be written to using std::ptr::write_unaligned.
+    let tip_addr = &raw mut data.szTip;
+    let mut sz_tip = data.szTip;
+    let n = tip.len().min(sz_tip.len() - 1);
+    sz_tip[..n].copy_from_slice(&tip[..n]);
+    unsafe { std::ptr::write_unaligned(tip_addr, sz_tip) };
+
     data
 }
 
