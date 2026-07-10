@@ -18,6 +18,7 @@ pub mod api {
     This module contains types that are public and re-exported in the slint-rs as well as the slint-interpreter crate as public API.
     */
 
+    #[doc(no_inline)]
     pub use super::wgpu;
 
     /// This data structure provides settings for initializing WGPU renderers.
@@ -378,13 +379,8 @@ pub fn init_instance_adapter_device_queue_surface(
 
 // Helper function to poll a future once. Remove once the suspension API uses async.
 fn poll_once<F: std::future::Future>(future: F) -> Option<F::Output> {
-    struct DummyWaker();
-    impl std::task::Wake for DummyWaker {
-        fn wake(self: std::sync::Arc<Self>) {}
-    }
-
-    let waker = std::sync::Arc::new(DummyWaker()).into();
-    let mut ctx = std::task::Context::from_waker(&waker);
+    let waker = std::task::Waker::noop();
+    let mut ctx = std::task::Context::from_waker(waker);
 
     let future = std::pin::pin!(future);
 

@@ -6,10 +6,13 @@ use crate::dynamic_item_tree::ErasedItemTreeBox;
 
 use super::*;
 use core::ptr::NonNull;
-use i_slint_core::model::{Model, ModelNotify, SharedVectorModel};
+use i_slint_core::model::{Model, ModelNotify, ModelRc, SharedVectorModel};
 use i_slint_core::slice::Slice;
 use i_slint_core::window::WindowAdapter;
+use smol_str::SmolStr;
 use std::ffi::c_void;
+use std::path::PathBuf;
+use std::rc::Rc;
 use vtable::VRef;
 
 /// Construct a new Value in the given memory location
@@ -176,6 +179,58 @@ pub extern "C" fn slint_interpreter_value_to_struct(val: &Value) -> *const Struc
 pub extern "C" fn slint_interpreter_value_to_image(val: &Value) -> Option<&Image> {
     match val {
         Value::Image(img) => Some(img),
+        _ => None,
+    }
+}
+
+/// Construct a new Value containing a DataTransfer
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_new_data_transfer(
+    data: &i_slint_core::data_transfer::DataTransfer,
+) -> Box<Value> {
+    Box::new(Value::DataTransfer(data.clone()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_to_data_transfer(
+    val: &Value,
+) -> Option<&i_slint_core::data_transfer::DataTransfer> {
+    match val {
+        Value::DataTransfer(data) => Some(data),
+        _ => None,
+    }
+}
+
+/// Construct a new Value containing a Keys
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_new_keys(keys: &i_slint_core::input::Keys) -> Box<Value> {
+    Box::new(Value::Keys(keys.clone()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_to_keys(
+    val: &Value,
+) -> Option<&i_slint_core::input::Keys> {
+    match val {
+        Value::Keys(keys) => Some(keys),
+        _ => None,
+    }
+}
+
+/// Construct a new Value containing a StyledText
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_new_styled_text(
+    text: &i_slint_core::styled_text::StyledText,
+) -> Box<Value> {
+    Box::new(Value::StyledText(text.clone()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_to_styled_text(
+    val: &Value,
+) -> Option<&i_slint_core::styled_text::StyledText> {
+    match val {
+        Value::StyledText(text) => Some(text),
         _ => None,
     }
 }
@@ -802,7 +857,7 @@ pub unsafe extern "C" fn slint_interpreter_component_compiler_get_diagnostics(
     out_diags: &mut SharedVector<Diagnostic>,
 ) {
     #[allow(deprecated)]
-    out_diags.extend(compiler.as_component_compiler().diagnostics.iter().map(|diagnostic| {
+    out_diags.extend(compiler.as_component_compiler().diagnostics().iter().map(|diagnostic| {
         let (line, column) = diagnostic.line_column();
         Diagnostic {
             message: diagnostic.message().into(),

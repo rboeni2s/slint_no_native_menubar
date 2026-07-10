@@ -79,10 +79,10 @@ impl Inner {
         }
     }
 
-    fn activated(&self) {
+    fn clicked(&self) {
         let Some(item_rc) = self.self_weak.upgrade() else { return };
         let Some(tray) = item_rc.downcast::<super::SystemTrayIcon>() else { return };
-        tray.as_pin_ref().activated.call(&());
+        tray.as_pin_ref().clicked.call(&());
     }
 }
 
@@ -269,7 +269,7 @@ impl Drop for PlatformTray {
 
             // Detach from the window before destroying it so any pending messages
             // resolve through DefWindowProc.
-            SetWindowLongPtrW(self.inner.hwnd, GWLP_USERDATA, 0);
+            SetWindowLongPtrW(self.inner.hwnd, GWLP_USERDATA, 0 as _);
             if let Some(m) = self.inner.hmenu.take() {
                 let _ = DestroyMenu(m);
             }
@@ -301,7 +301,7 @@ unsafe extern "system" fn wnd_proc(
         } else if event == WM_LBUTTONUP {
             let inner_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Inner;
             if !inner_ptr.is_null() {
-                unsafe { &*inner_ptr }.activated();
+                unsafe { &*inner_ptr }.clicked();
             }
         }
         return LRESULT(0);
@@ -459,24 +459,19 @@ fn create_hicon(icon: &Image) -> Result<HICON, Error> {
 // trailing fields (`szInfo`, `szInfoTitle`, `guidItem`, …) are zero-initialized
 // via `Default::default()`, which also NUL-terminates `szTip` past the copy.
 fn notify_icon_data(hwnd: HWND, hicon: HICON, tip: &[u16]) -> NOTIFYICONDATAW {
-    let mut data = NOTIFYICONDATAW {
+    let mut buf = [0u16; 128];
+    let n = tip.len().min(buf.len() - 1);
+    buf[..n].copy_from_slice(&tip[..n]);
+    NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: hwnd,
         uID: TRAY_UID,
         uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
         uCallbackMessage: WM_TRAYICON,
         hIcon: hicon,
+        szTip: buf,
         ..Default::default()
-    };
-
-    //NOTE: szTip is unaligned in i686-pc-windows-msvc and can only be written to using std::ptr::write_unaligned.
-    let tip_addr = &raw mut data.szTip;
-    let mut sz_tip = data.szTip;
-    let n = tip.len().min(sz_tip.len() - 1);
-    sz_tip[..n].copy_from_slice(&tip[..n]);
-    unsafe { std::ptr::write_unaligned(tip_addr, sz_tip) };
-
-    data
+    }
 }
 
 fn append_menu_entry(

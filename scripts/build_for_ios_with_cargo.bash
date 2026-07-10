@@ -25,6 +25,14 @@ export CARGO_PROFILE_RELEASE_DEBUG="${CARGO_PROFILE_RELEASE_DEBUG:-1}"
 # Make Cargo output cache files in Xcode's directories
 export CARGO_TARGET_DIR="$DERIVED_FILE_DIR/cargo"
 
+# Xcode Cloud exposes its build counter as CI_BUILD_NUMBER. Forward it as
+# SLINT_BUILD_NUMBER so the viewer's idle screen can show which CI build it
+# came from. Local Xcode builds don't set CI_BUILD_NUMBER, in which case we
+# leave SLINT_BUILD_NUMBER unset and the idle screen omits the build line.
+if [ -n "${CI_BUILD_NUMBER:-}" ]; then
+    export SLINT_BUILD_NUMBER="$CI_BUILD_NUMBER"
+fi
+
 IS_SIMULATOR=0
 if [ "${LLVM_TARGET_TRIPLE_SUFFIX-}" = "-simulator" ]; then
   IS_SIMULATOR=1
@@ -65,7 +73,14 @@ fi
 # Force code signing every run for device builds (non-simulator), unless code
 # signing is disabled (e.g. unsigned archive builds with CODE_SIGNING_ALLOWED=NO).
 if [ $IS_SIMULATOR -eq 0 ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-    codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" \
-             --entitlements "${TARGET_TEMP_DIR}/${PRODUCT_NAME}.app.xcent" \
-             "${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}"
+    # Only pass --entitlements when the .xcent file is non-empty (needed for Xcode Cloud).
+    ENTITLEMENTS_FILE="${TARGET_TEMP_DIR}/${PRODUCT_NAME}.app.xcent"
+    if [ -s "$ENTITLEMENTS_FILE" ]; then
+        codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" \
+                 --entitlements "$ENTITLEMENTS_FILE" \
+                 "${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}"
+    else
+        codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" \
+                 "${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}"
+    fi
 fi

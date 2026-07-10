@@ -16,11 +16,19 @@ use std::pin::Pin;
 use std::rc::Rc;
 use typed_index_collections::TiVec;
 
+/// The fonts shared with `embed_glyphs` to rasterize SVG `<text>`. Only the
+/// software renderer embeds textures, so elsewhere this is an unused placeholder.
+#[cfg(feature = "software-renderer")]
+pub(crate) type SharedFontCollection = super::embed_glyphs::SharedFontCollection;
+#[cfg(not(feature = "software-renderer"))]
+pub(crate) type SharedFontCollection = ();
+
 pub async fn embed_images(
     doc: &Document,
     embed_files: EmbedResourcesKind,
     scale_factor: f32,
     resource_url_mapper: &Option<Rc<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>>>>>>,
+    font_collection: Option<&SharedFontCollection>,
     diag: &mut BuildDiagnostics,
 ) {
     if embed_files == EmbedResourcesKind::Nothing && resource_url_mapper.is_none() {
@@ -65,8 +73,32 @@ pub async fn embed_images(
                 embed_files,
                 scale_factor,
                 diag,
+                font_collection,
             )
         });
+    }
+}
+
+/// The URL of an image reference, as expected by the resource mapper and used
+/// to key the map of mapped resources. A local image reference is an absolute
+/// filesystem path at this stage, so turn it into a `file://` URL; references
+/// that are already URLs (`data:`, `builtin:/`, `https:`, ...) pass through
+/// unchanged.
+fn image_reference_url(resource: &str) -> SmolStr {
+    if crate::pathutils::is_url(std::path::Path::new(resource)) {
+        return resource.into();
+    }
+    // `Url::from_file_path` is absent on `wasm32-unknown-unknown`, which only
+    // ever sees URL references and so never reaches this branch.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        url::Url::from_file_path(resource)
+            .map(|url| SmolStr::from(url.as_str()))
+            .unwrap_or_else(|()| resource.into())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        resource.into()
     }
 }
 
@@ -76,8 +108,11 @@ fn collect_image_urls_from_expression(
 ) {
     if let Expression::ImageReference { resource_ref, .. } = e
         && let ImageReference::AbsolutePath(path) = resource_ref
+        // `data:` URIs are embedded directly and never looked up in this map, so
+        // don't store their (potentially huge) content as a key.
+        && !path.starts_with("data:")
     {
-        urls.insert(path.clone(), None);
+        urls.insert(image_reference_url(path), None);
     };
 
     e.visit(|e| collect_image_urls_from_expression(e, urls));
@@ -91,6 +126,7 @@ fn embed_images_from_expression(
     embed_files: EmbedResourcesKind,
     scale_factor: f32,
     diag: &mut BuildDiagnostics,
+    font_collection: Option<&SharedFontCollection>,
 ) {
     if let Expression::ImageReference { resource_ref, source_location, nine_slice: _ } = e
         && let ImageReference::AbsolutePath(path) = resource_ref
@@ -110,15 +146,16 @@ fn embed_images_from_expression(
                     scale_factor,
                     diag,
                     source_location,
+                    font_collection,
                 );
                 *resource_ref = image_ref;
             }
             return;
         }
 
-        // used mapped path:
+        // use the mapped url, falling back to the original path:
         let mapped_path =
-            urls.get(path).unwrap_or(&Some(path.clone())).clone().unwrap_or(path.clone());
+            urls.get(&image_reference_url(path)).cloned().flatten().unwrap_or_else(|| path.clone());
         *path = mapped_path;
         if embed_files != EmbedResourcesKind::Nothing
             && (embed_files != EmbedResourcesKind::OnlyBuiltinResources
@@ -132,6 +169,7 @@ fn embed_images_from_expression(
                 scale_factor,
                 diag,
                 source_location,
+                font_collection,
             );
             if embed_files != EmbedResourcesKind::ListAllResources {
                 *resource_ref = image_ref;
@@ -148,6 +186,7 @@ fn embed_images_from_expression(
             embed_files,
             scale_factor,
             diag,
+            font_collection,
         )
     });
 }
@@ -160,6 +199,7 @@ fn embed_image(
     _scale_factor: f32,
     diag: &mut BuildDiagnostics,
     source_location: &Option<crate::diagnostics::SourceLocation>,
+    _font_collection: Option<&SharedFontCollection>,
 ) -> ImageReference {
     let extension = || {
         std::path::Path::new(path)
@@ -198,7 +238,7 @@ fn embed_image(
 
     #[cfg(feature = "software-renderer")]
     if embed_files == EmbedResourcesKind::EmbedTextures {
-        return match load_image(_file, _scale_factor) {
+        return match load_image(_file, _scale_factor, _font_collection) {
             Ok((img, source_format, original_size)) => {
                 let resource_id = push(EmbeddedResourcesKind::TextureData(generate_texture(
                     img,
@@ -384,11 +424,37 @@ enum SourceFormat {
     Rgba,
 }
 
+/// usvg renders SVG `<text>` against its own font database. The compiler has no
+/// `SlintContext`, so resolve those fonts against the collection shared with
+/// `embed_glyphs` (system fonts plus imported fonts) through the shared bridge.
+#[cfg(feature = "software-renderer")]
+fn svg_font_options(
+    font_collection: Option<&SharedFontCollection>,
+) -> resvg::usvg::Options<'static> {
+    use i_slint_common::sharedfontique::svg as svg_fonts;
+
+    let Some(font_collection) = font_collection.cloned() else {
+        return resvg::usvg::Options::default();
+    };
+    svg_fonts::options(move |families, attributes, require_char| {
+        let mut fonts = font_collection.lock().ok()?;
+        let collection = &mut fonts.collection;
+        svg_fonts::query_font(
+            &mut collection.inner,
+            &mut collection.source_cache,
+            families,
+            attributes,
+            require_char,
+        )
+    })
+}
+
 #[cfg(feature = "software-renderer")]
 fn load_image_from_bytes(
     data: &[u8],
     extension: Option<&str>,
     scale_factor: f32,
+    font_collection: Option<&SharedFontCollection>,
 ) -> image::ImageResult<(image::RgbaImage, SourceFormat, Size)> {
     use resvg::{tiny_skia, usvg};
 
@@ -396,8 +462,7 @@ fn load_image_from_bytes(
 
     if is_svg {
         let tree = {
-            let option = usvg::Options::default();
-            usvg::Tree::from_data(data, &option).map_err(|e| {
+            usvg::Tree::from_data(data, &svg_font_options(font_collection)).map_err(|e| {
                 image::ImageError::Decoding(image::error::DecodingError::new(
                     image::error::ImageFormatHint::Name("svg".into()),
                     e,
@@ -461,6 +526,7 @@ fn load_image_from_bytes(
 fn load_image(
     file: crate::fileaccess::VirtualFile,
     scale_factor: f32,
+    font_collection: Option<&SharedFontCollection>,
 ) -> image::ImageResult<(image::RgbaImage, SourceFormat, Size)> {
     use std::ffi::OsStr;
 
@@ -472,7 +538,7 @@ fn load_image(
         std::fs::read(&file.canon_path)?
     };
 
-    load_image_from_bytes(&data, extension, scale_factor)
+    load_image_from_bytes(&data, extension, scale_factor, font_collection)
 }
 
 fn embed_data_uri(
@@ -483,6 +549,7 @@ fn embed_data_uri(
     _scale_factor: f32,
     diag: &mut BuildDiagnostics,
     source_location: &Option<crate::diagnostics::SourceLocation>,
+    _font_collection: Option<&SharedFontCollection>,
 ) -> ImageReference {
     if let Some(&resource_id) = path_to_id.get(data_uri) {
         let resources = global_embedded_resources.borrow();
@@ -515,8 +582,13 @@ fn embed_data_uri(
 
     #[cfg(feature = "software-renderer")]
     if _embed_files == EmbedResourcesKind::EmbedTextures {
-        match load_image_from_bytes(&decoded_data, Some(&extension), _scale_factor)
-            .map_err(|e| e.to_string())
+        match load_image_from_bytes(
+            &decoded_data,
+            Some(&extension),
+            _scale_factor,
+            _font_collection,
+        )
+        .map_err(|e| e.to_string())
         {
             Ok((img, source_format, original_size)) => {
                 let resource_id = push(EmbeddedResourcesKind::TextureData(generate_texture(
